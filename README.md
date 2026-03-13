@@ -457,3 +457,4 @@ MIT License - 自由使用和修改
 
 **最后更新: 2024年12月1日**  
 **项目版本: 1.0.0**
+<!-- Updated for Railway deployment -->
