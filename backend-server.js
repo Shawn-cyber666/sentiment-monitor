@@ -22,7 +22,10 @@ app.use(cors());
 app.use(express.json());
 
 // Redis 客户端
-const redisClient = redis.createClient({
+// 这里的 process.env.REDIS_URL 会自动读取你在 Railway 设置的那个变量
+const client = createClient({
+    url: process.env.REDIS_URL || 'redis://localhost:6379'
+});
   host: process.env.REDIS_HOST || 'localhost',
   port: process.env.REDIS_PORT || 6379
 });
