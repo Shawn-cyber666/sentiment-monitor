@@ -21,11 +21,15 @@ const io = socketIo(server, {
 app.use(cors());
 app.use(express.json());
 
-// Redis 客户端
-// 这里的 process.env.REDIS_URL 会自动读取你在 Railway 设置的那个变量
+// 创建 Redis 客户端
 const client = require('redis').createClient({
-  url: process.env.REDIS_URL || 'redis://localhost:6379'
+    url: process.env.REDIS_URL || 'redis://localhost:6379'
 });
+
+client.on('error', (err) => console.log('Redis Client Error', err));
+
+// 连接 Redis
+client.connect().catch(console.error);
 
 client.on('error', (err) => console.log('Redis Client Error', err));
   host: process.env.REDIS_HOST || 'localhost',
