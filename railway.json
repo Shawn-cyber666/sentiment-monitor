@@ -1,4 +1,4 @@
 {
-  "buildCommand": "npm ci",
+  "buildCommand": "npm install",
   "startCommand": "node app.js"
 }
