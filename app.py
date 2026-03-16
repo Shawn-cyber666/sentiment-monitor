@@ -5,6 +5,7 @@ from wordcloud import WordCloud
 import matplotlib.pyplot as plt
 from datetime import datetime
 import urllib.parse
+from pathlib import Path
 
 # 1. 页面级配置：科技感与宽屏模式
 st.set_page_config(page_title="旗舰产品 舆情战略指挥中心", layout="wide", initial_sidebar_state="expanded")
@@ -28,6 +29,55 @@ CATEGORIES = {
 # 负面触发词
 NEG_TRIGGERS = ["差", "烂", "不行", "避雷", "吐槽", "失望", "太贵", "没升级", "阉割", "遗憾"]
 
+
+def normalize_text(text: str) -> str:
+    """统一文本清洗，避免大小写/空值导致的误判。"""
+    return str(text or "").strip().lower()
+
+
+def classify_category(title: str) -> str:
+    """基于标题关键词匹配舆情模块。"""
+    normalized_title = normalize_text(title)
+    for cat, keywords in CATEGORIES.items():
+        if any(normalize_text(k) in normalized_title for k in keywords):
+            return cat
+    return "未分类/综合"
+
+
+def detect_sentiment(title: str, assigned_cat: str) -> str:
+    """轻量负向情绪识别，优先命中触发词。"""
+    normalized_title = normalize_text(title)
+    has_negative_trigger = any(normalize_text(w) in normalized_title for w in NEG_TRIGGERS)
+    # 已分类内容且命中负向触发词时优先视为负向；其余归为资讯流
+    if assigned_cat != "未分类/综合" and has_negative_trigger:
+        return "负向"
+    return "正向"
+
+
+def resolve_source(link: str, source: str) -> str:
+    link = normalize_text(link)
+    source = normalize_text(source)
+    if "weibo" in link or "微博" in source:
+        return "微博"
+    if "tieba" in link or "贴吧" in source:
+        return "贴吧"
+    return "综合媒体/论坛"
+
+
+def create_wordcloud(text: str, colormap: str) -> WordCloud | None:
+    """兼容字体缺失场景，避免词云生成直接失败。"""
+    if not text.strip():
+        return None
+
+    font_path = "font.ttf" if Path("font.ttf").exists() else None
+    return WordCloud(
+        font_path=font_path,
+        width=600,
+        height=350,
+        background_color="white",
+        colormap=colormap,
+    ).generate(text)
+
 # 3. 侧边栏：监控台
 with st.sidebar:
     st.markdown("<h3 class='tech-title'>⚙️ 指挥台配置</h3>", unsafe_allow_html=True)
@@ -50,6 +100,7 @@ def fetch_omnidata(keyword):
     feed = feedparser.parse(rss_url)
     data = []
     
+    seen_links = set()
     for entry in feed.entries[:80]:
         title = entry.title.split(" - ")[0]
         source = entry.title.split(" - ")[1] if " - " in entry.title else "全网抓取"
@@ -70,6 +121,19 @@ def fetch_omnidata(keyword):
         is_negative = assigned_cat != "未分类/综合" and any(w in title for w in NEG_TRIGGERS)
         sentiment = "负向" if is_negative else "正向"
         
+        link = entry.get("link", "")
+        if not link or link in seen_links:
+            continue
+        seen_links.add(link)
+
+        title_text = entry.get("title", "")
+        title = title_text.split(" - ")[0]
+        source = title_text.split(" - ")[1] if " - " in title_text else "全网抓取"
+
+        source_clean = resolve_source(link, source)
+        assigned_cat = classify_category(title)
+        sentiment = detect_sentiment(title, assigned_cat)
+
         data.append({
             "状态": "🔴 槽点" if sentiment == "负向" else "🟢 资讯",
             "所属模块": assigned_cat,
@@ -78,6 +142,8 @@ def fetch_omnidata(keyword):
             "倾向": sentiment,
             "原文链接": entry.link,
             "发布时间": entry.published
+            "原文链接": link,
+            "发布时间": entry.get("published", "未知")
         })
             
     return pd.DataFrame(data)
@@ -103,12 +169,7 @@ try:
         neg_df = df[df["倾向"] == "负向"]
         
         # 顶部核心指标
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("全网数据采样", f"{len(df)} 组")
-        c2.metric("捕获核心槽点", f"{len(neg_df)} 条")
-        c3.metric("负面情绪浓度", f"{int((len(neg_df)/len(df))*100)}%", delta_color="inverse")
-        c4.metric("舆论健康度", f"{100 - int((len(neg_df)/len(df))*100)}")
-
+@@ -112,60 +157,68 @@ try:
         # 核心功能 1：数据透视矩阵 (Pivot Table)
         st.subheader("💠 硬件痛点交叉透视矩阵")
         if not neg_df.empty:
@@ -136,6 +197,12 @@ try:
             if all_text:
                 wc1 = WordCloud(font_path='font.ttf', width=600, height=350, background_color="white", colormap='Blues').generate(all_text)
                 fig1, ax1 = plt.subplots(); ax1.imshow(wc1); ax1.axis("off"); st.pyplot(fig1)
+                wc1 = create_wordcloud(all_text, "Blues")
+                if wc1:
+                    fig1, ax1 = plt.subplots()
+                    ax1.imshow(wc1)
+                    ax1.axis("off")
+                    st.pyplot(fig1)
 
         with cw2:
             st.subheader("🔴 核心痛点云 (吐槽区)")
@@ -147,6 +214,13 @@ try:
                 
                 wc2 = WordCloud(font_path='font.ttf', width=600, height=350, background_color="white", colormap='Reds').generate(neg_text)
                 fig2, ax2 = plt.subplots(); ax2.imshow(wc2); ax2.axis("off"); st.pyplot(fig2)
+
+                wc2 = create_wordcloud(neg_text, "Reds")
+                if wc2:
+                    fig2, ax2 = plt.subplots()
+                    ax2.imshow(wc2)
+                    ax2.axis("off")
+                    st.pyplot(fig2)
             else:
                 st.info("暂无集中负面词汇")
 
