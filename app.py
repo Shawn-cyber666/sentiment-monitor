@@ -1,144 +1,141 @@
 import streamlit as st
 import feedparser
 import pandas as pd
-from wordcloud import WordCloud
-import matplotlib.pyplot as plt
 from datetime import datetime
 import urllib.parse
+import re
 
-# 1. 页面配置
-st.set_page_config(page_title="vivo 旗舰舆情战略指挥中心", layout="wide")
+# 1. 页面级配置：开启全屏沉浸模式与暗黑高科技风
+st.set_page_config(page_title="旗舰产品 UGC 痛点透视舱", layout="wide", initial_sidebar_state="expanded")
 
-# 2. 侧边栏
-st.sidebar.header("🕹️ 监控指挥台")
-target_model = st.sidebar.selectbox(
-    "核心监控目标", 
-    ["vivo X300 Ultra", "vivo X300s", "小米 17 Ultra", "OPPO Find X8 Ultra", "荣耀 Magic 8 至臻版"]
-)
+# 自定义极简高科技 CSS
+st.markdown("""
+    <style>
+    /* 隐藏顶部默认导航条和底部水印 */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    /* 调整全局字体和间距 */
+    .block-container {padding-top: 2rem; padding-bottom: 0rem;}
+    /* 科技感主标题 */
+    .tech-title {font-family: 'Helvetica Neue', sans-serif; font-weight: 300; color: #E0E0E0; letter-spacing: 2px;}
+    .highlight-red {color: #FF4B4B; font-weight: bold;}
+    </style>
+""", unsafe_allow_html=True)
 
-# --- 语义引擎配置 ---
-# 中性硬件词（不代表负面）
-HARDWARE_LIST = ['超广角', '主摄', '长焦', '屏幕', '电池', '快充', '传感器', '影像', '指纹']
-# 真正的负面动作/状态
-NEG_ACTIONS = ['没升级', '阉割', '缩水', '旧款', '遗憾', '吐槽', '避雷', '差', '烂', '后悔', '智商税', '偏色', '发热']
-# 排除误判
-EXCLUDE_WORDS = ['差别', '差不多', '出差']
+# 2. 核心分析字典：将槽点分类，用于透视表
+CATEGORIES = {
+    "影像系统": ["超广角", "主摄", "长焦", "传感器", "jn1", "828", "拍照", "偏色", "抹抹感"],
+    "性能与体验": ["发热", "卡顿", "死机", "断触", "马达", "信号"],
+    "续航与充电": ["电池", "续航", "快充", "掉电", "充电慢"],
+    "外观与设计": ["手感", "重量", "太重", "厚度", "丑", "塑料", "缝隙"],
+    "定价与综合": ["贵", "智商税", "背刺", "没诚意", "没升级", "遗憾", "阉割"]
+}
 
-# 3. 智能语义判定函数
-def analyze_deep_sentiment(title):
-    title_lower = title.lower()
-    
-    # 首先检查是否包含误判词
-    if any(ex in title_lower for ex in EXCLUDE_WORDS):
-        return "正向", "无"
-    
-    # 查找是否有硬件词被提及
-    mentioned_hardware = [hw for hw in HARDWARE_LIST if hw in title_lower]
-    # 查找是否有负面动作
-    hit_neg_actions = [neg for neg in NEG_ACTIONS if neg in title_lower]
-    
-    # 逻辑：如果有负面动作，则判定为负向
-    if hit_neg_actions:
-        # 如果同时提到了硬件，则组合成痛点标签 (如: 超广角+没升级)
-        if mentioned_hardware:
-            pains = [f"{hw}{hit_neg_actions[0]}" for hw in mentioned_hardware]
-            return "负向", " / ".join(pains)
-        else:
-            return "负向", hit_neg_actions[0]
-            
-    return "正向", "无"
+# 3. 侧边栏：极简控制台
+with st.sidebar:
+    st.markdown("<h3 class='tech-title'>⚙️ 控制台</h3>", unsafe_allow_html=True)
+    target_model = st.selectbox("核心监测对象", ["vivo X300 Ultra", "vivo X300s", "OPPO Find X8 Ultra", "小米 17 Ultra"])
+    st.caption("引擎状态：UGC 评论碎片深度嗅探中...")
 
-def fetch_strategic_data(keyword):
-    # 增加搜索深度，确保抓到细节
-    search_q = f"{keyword} (评价 OR 吐槽 OR 规格 OR 遗憾)"
-    encoded_q = urllib.parse.quote(search_q)
+# 4. 数据抓取与分类引擎
+@st.cache_data(ttl=600) # 加入缓存机制，避免频繁请求被ban
+def fetch_and_categorize(keyword):
+    # 强制搜索论坛回复类关键词
+    q = f"{keyword} (评论说 OR 网友吐槽 OR 回复贴 OR 缺点)"
+    encoded_q = urllib.parse.quote(q)
     rss_url = f"https://news.google.com/rss/search?q={encoded_q}&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"
     
     feed = feedparser.parse(rss_url)
     data = []
     
-    for entry in feed.entries[:50]:
+    for entry in feed.entries[:80]: # 扩大采样
         title = entry.title.split(" - ")[0]
-        source = entry.title.split(" - ")[1] if " - " in entry.title else "全网"
+        source = entry.title.split(" - ")[1] if " - " in entry.title else "社区平台"
         
-        sentiment, pain_label = analyze_deep_sentiment(title)
+        # 简化来源名称，方便透视
+        if "weibo" in entry.link or "微博" in source: source_clean = "微博"
+        elif "tieba" in entry.link or "贴吧" in source: source_clean = "贴吧"
+        else: source_clean = "综合论坛"
+
+        # 分类归属逻辑
+        assigned_cat = "未分类/杂项"
+        for cat, keywords in CATEGORIES.items():
+            if any(k in title.lower() for k in keywords):
+                assigned_cat = cat
+                break # 归入第一个匹配的类别
+                
+        # 判定是否为负面情感 (简单逻辑：包含贬义词或属于核心吐槽类别)
+        is_negative = assigned_cat != "未分类/杂项" or any(w in title for w in ["差", "烂", "不行", "避雷"])
         
-        data.append({
-            "级别": "🔴 预警" if sentiment == "负向" else "🟢 稳健",
-            "内容摘要": title,
-            "来源媒体": source,
-            "核心痛点": pain_label,
-            "倾向": sentiment,
-            "链接": entry.link,
-            "发布时间": entry.published
-        })
+        if is_negative:
+            data.append({
+                "关联模块": assigned_cat,
+                "平台来源": source_clean,
+                "用户评论碎片": title,
+                "原文链接": entry.link
+            })
+            
     return pd.DataFrame(data)
 
-# 4. 主看板渲染
-st.title(f"📡 {target_model} 实时舆情战略看板")
+# 5. 主界面渲染
+st.markdown(f"<h1 class='tech-title'>DATA LAB // <span class='highlight-red'>{target_model}</span> 痛点透视舱</h1>", unsafe_allow_html=True)
 
 try:
-    with st.spinner('正在进行语义脱敏与痛点提炼...'):
-        df = fetch_strategic_data(target_model)
+    with st.spinner('正在解构底层 UGC 数据...'):
+        df = fetch_and_categorize(target_model)
 
     if not df.empty:
-        neg_df = df[df["倾向"] == "负向"]
-        
-        # 指标区
-        c1, c2, c3 = st.columns(3)
-        c1.metric("样本深度", f"{len(df)} 组")
-        c2.metric("有效负面占比", f"{len(neg_df)} 条", delta=f"{int(len(neg_df)/len(df)*100)}%", delta_color="inverse")
-        c3.metric("口碑指数", f"{100 - int(len(neg_df)/len(df)*100)}")
-
-        # 直达链接
+        # --- 核心：数据透视表 (Pivot Table) ---
         st.write("---")
-        q_code = urllib.parse.quote(target_model)
-        l1, l2, l3, l4 = st.columns(4)
-        l1.link_button("👁️ 微博实时", f"https://s.weibo.com/weibo?q={q_code}")
-        l2.link_button("💬 贴吧讨论", f"https://tieba.baidu.com/f/search/res?qw={q_code}")
-        l3.link_button("📕 小红书吐槽", f"https://www.xiaohongshu.com/search_result?keyword={q_code}%20吐槽")
-        l4.link_button("🎞️ B站避雷", f"https://search.bilibili.com/all?keyword={q_code}%20避雷")
-
-        # 数据列表
-        st.subheader("📑 精准舆情情报流")
+        st.markdown("### 💠 痛点分布矩阵 (Pivot Matrix)")
+        
+        # 使用 Pandas 生成透视表：行是硬件模块，列是来源平台，值是吐槽数量
+        pivot_df = pd.pivot_table(
+            df, 
+            index="关联模块", 
+            columns="平台来源", 
+            values="用户评论碎片", 
+            aggfunc="count", 
+            fill_value=0,
+            margins=True,
+            margins_name="🔥 总计痛点"
+        )
+        
+        # 渲染透视表，使用渐变背景色突出重灾区
         st.dataframe(
-            df,
-            column_config={
-                "内容摘要": st.column_config.TextColumn("内容摘要", width="large"),
-                "核心痛点": st.column_config.TextColumn("提炼痛点", width="medium"),
-                "链接": st.column_config.LinkColumn("直达", display_text="🔗")
-            },
-            hide_index=True, use_container_width=True
+            pivot_df.style.background_gradient(cmap="Reds", axis=None),
+            use_container_width=True
         )
 
-        # 词云区
-        st.divider()
-        v1, v2 = st.columns(2)
+        st.write("---")
+        # --- 下半部分：双列深度数据 ---
+        col1, col2 = st.columns([1.5, 1])
         
-        with v1:
-            st.subheader("🔵 全网高频词 (大家在聊什么)")
-            all_txt = " ".join(df["内容摘要"].tolist())
-            wc1 = WordCloud(font_path='font.ttf', width=600, height=400, background_color="white", colormap='Blues').generate(all_txt)
-            fig1, ax1 = plt.subplots(); ax1.imshow(wc1); ax1.axis("off"); st.pyplot(fig1)
-
-        with v2:
-            st.subheader("🔴 核心槽点分析 (大家在骂什么)")
-            if not neg_df.empty:
-                # 语义清理：生成负面词云时，过滤掉中性硬件名词
-                neg_txt = " ".join(neg_df["内容摘要"].tolist()).lower()
-                for stop_w in [target_model, 'vivo', 'x300', 'ultra', '小米', 'oppo'] + HARDWARE_LIST:
-                    neg_txt = neg_txt.replace(stop_w.lower(), "")
-                
-                if neg_txt.strip():
-                    wc2 = WordCloud(font_path='font.ttf', width=600, height=400, background_color="white", colormap='Reds').generate(neg_txt)
-                    fig2, ax2 = plt.subplots(); ax2.imshow(wc2); ax2.axis("off"); st.pyplot(fig2)
-                else:
-                    st.info("检测到零散负面，但尚未形成集中痛点词。")
+        with col1:
+            st.markdown("### 💬 核心痛点采样录")
+            st.dataframe(
+                df[["关联模块", "用户评论碎片", "原文链接"]],
+                column_config={
+                    "关联模块": st.column_config.TextColumn("分类", width="small"),
+                    "用户评论碎片": st.column_config.TextColumn("内容", width="large"),
+                    "原文链接": st.column_config.LinkColumn("溯源", display_text="🔗")
+                },
+                hide_index=True, use_container_width=True, height=400
+            )
+            
+        with col2:
+            st.markdown("### 📊 槽点模块占比")
+            # 过滤掉未分类，画一个极简的环形图
+            pie_data = df[df["关联模块"] != "未分类/杂项"]["关联模块"].value_counts()
+            if not pie_data.empty:
+                st.bar_chart(pie_data, color="#FF4B4B")
             else:
-                st.success("✨ 当前样本内未发现显著参数槽点。")
+                st.info("数据量不足以生成占比图。")
 
     else:
-        st.error("数据调取失败，请稍后刷新。")
+        st.warning("📡 暂未捕获到足量的碎片数据，请尝试更换监测对象。")
 
 except Exception as e:
-    st.error(f"分析引擎故障: {e}")
+    st.error(f"⚠️ 矩阵通讯中断: {e}")
+
+st.caption(f"SYS_TIME: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} // DATA_MODE: UGC_SNIPPET_PIVOT")
