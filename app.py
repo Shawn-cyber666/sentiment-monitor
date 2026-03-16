@@ -5,119 +5,136 @@ from wordcloud import WordCloud
 import matplotlib.pyplot as plt
 from datetime import datetime
 import urllib.parse
+import collections
 
-# 1. 页面配置
-st.set_page_config(page_title="vivo 参数口碑预研系统", layout="wide")
+# 1. 页面配置：黑色科技感主题
+st.set_page_config(page_title="vivo 旗舰舆情战略指挥中心", layout="wide")
 
-# 2. 侧边栏：机型库
-st.sidebar.header("🎯 2026 旗舰舆情监控")
+# 2. 侧边栏：机型与深度配置
+st.sidebar.header("🕹️ 监控指挥台")
 target_model = st.sidebar.selectbox(
-    "选择监控型号", 
+    "核心监控目标", 
     ["vivo X300 Ultra", "vivo X300s", "小米 17 Ultra", "OPPO Find X8 Ultra", "荣耀 Magic 8 至臻版"]
 )
-search_keyword = st.sidebar.text_input("或自定义搜索 (如: X300u 超广角)", "")
-final_keyword = search_keyword if search_keyword else target_model
+warning_level = st.sidebar.slider("预警敏感度", 10, 50, 20)
 
-# 深度负面语义库：专门针对“参数泄露”阶段的吐槽
-NEG_WORDS = ['没升级', '阉割', '遗憾', '失望', '旧款', '828', 'jn1', '传感器差', '没诚意', '丑', '贵', '智商税', '吐槽', '避雷', '差评', '不如前代']
-EXCLUDE_WORDS = ['差别', '差不多', '出差']
+# 定义核心监控雷点 (这些词会直接触发红色预警)
+CORE_PAIN_POINTS = ['828', 'jn1', '超广角', '没升级', '旧款', '阉割', '缩水', '发热', '太贵', '背刺']
+NEG_WORDS = CORE_PAIN_POINTS + ['差', '烂', '断触', '后悔', '避雷', '吐槽', '失望']
 
-# 3. UGC 数据穿透引擎
-def fetch_ugc_data(keyword):
-    # 策略：锁定微博和贴吧，强行搜索“不满/遗憾”
-    # site:weibo.com 确保搜到的是微博用户的发言
-    query = f"(site:weibo.com OR site:tieba.baidu.com) {keyword} (没升级 OR 遗憾 OR 槽点 OR 失望)"
-    encoded_q = urllib.parse.quote(query)
-    # 使用 Google 索引的 UGC 内容（时效性极高）
-    rss_url = f"https://news.google.com/rss/search?q={encoded_q}&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"
+# 3. 智能数据引擎：多源抓取并聚合
+def fetch_strategic_data(keyword):
+    # 构造两个搜索任务：一个搜全网资讯，一个搜深度槽点
+    queries = [
+        f"{keyword}", # 基础流量
+        f"{keyword} (缺点 OR 遗憾 OR 吐槽 OR 相比前代)" # 深度负面穿透
+    ]
     
-    feed = feedparser.parse(rss_url)
-    data = []
-    
-    for entry in feed.entries[:60]:
-        title = entry.title
-        # 清洗标题中的微博后缀
-        clean_title = title.split(" - ")[0]
-        source = "微博/贴吧用户" if "weibo" in title.lower() or "tieba" in title.lower() else "社交平台"
-        
-        # 语义识别
-        sentiment = "正向"
-        if any(neg in clean_title.lower() for neg in NEG_WORDS):
-            if not any(ex in clean_title.lower() for ex in EXCLUDE_WORDS):
-                sentiment = "负向"
-        
-        data.append({
-            "级别": "🔴 槽点" if sentiment == "负向" else "🟢 讨论",
-            "用户发言摘要": clean_title,
-            "平台": source,
-            "倾向": sentiment,
-            "链接": entry.link,
-            "发布时间": entry.published
-        })
-    return pd.DataFrame(data)
+    all_data = []
+    seen_titles = set()
 
-# 4. 界面渲染
-st.title(f"🔍 {final_keyword} 用户参数不满/槽点分析")
-st.warning("当前模式：UGC 穿透（专门抓取微博、贴吧真实用户对参数的吐槽）")
+    for q in queries:
+        encoded_q = urllib.parse.quote(q)
+        rss_url = f"https://news.google.com/rss/search?q={encoded_q}&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"
+        feed = feedparser.parse(rss_url)
+        
+        for entry in feed.entries[:40]:
+            if entry.title in seen_titles: continue
+            seen_titles.add(entry.title)
+            
+            title = entry.title.split(" - ")[0]
+            source = entry.title.split(" - ")[1] if " - " in entry.title else "全网搜索"
+            
+            # 智能识别负面标签
+            found_pains = [p for p in CORE_PAIN_POINTS if p in title.lower()]
+            sentiment = "负向" if found_pains or any(n in title.lower() for n in NEG_WORDS) else "正向"
+            
+            all_data.append({
+                "级别": "🔴 预警" if sentiment == "负向" else "🟢 稳健",
+                "情报标题": title,
+                "来源": source,
+                "痛点标签": " / ".join(found_pains) if found_pains else "无",
+                "倾向": sentiment,
+                "链接": entry.link,
+                "时间": entry.published
+            })
+    return pd.DataFrame(all_data)
 
-# 平台直达：修正链接
-q_code = urllib.parse.quote(final_keyword)
-c1, c2, c3, c4 = st.columns(4)
-c1.markdown(f"[👁️ 微博实时动态](https://s.weibo.com/weibo?q={q_code})")
-c2.markdown(f"[💬 贴吧用户发帖](https://tieba.baidu.com/f/search/res?qw={q_code})")
-c3.markdown(f"[📕 小红书真实反馈](https://www.xiaohongshu.com/search_result?keyword={q_code}%20吐槽)")
-c4.markdown(f"[🎞️ B站弹幕/评论](https://search.bilibili.com/all?keyword={q_code}%20避雷)")
+# 4. 看板主体
+st.title(f"📡 {target_model} 实时舆情战略看板")
+st.markdown(f"**数据更新至：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}** | 监控范围：全网媒体 + 社交平台 UGC")
 
 try:
-    with st.spinner(f'正在深入微博/贴吧爬取关于 {final_keyword} 的真实不满...'):
-        df = fetch_ugc_data(final_keyword)
+    with st.spinner('正在分析全球情报源并提炼核心痛点...'):
+        df = fetch_strategic_data(target_model)
 
     if not df.empty:
         neg_df = df[df["倾向"] == "负向"]
         neg_percent = int((len(neg_df) / len(df)) * 100)
 
-        # 核心指标
-        m1, m2, m3 = st.columns(3)
-        m1.metric("UGC 采样数", f"{len(df)} 条")
-        m2.metric("参数不满占比", f"{neg_percent}%", delta="实测反馈", delta_color="inverse")
-        m3.metric("硬件舆论分", f"{100 - neg_percent}")
+        # 第一行：核心指标
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("监测样本量", f"{len(df)} 篇")
+        c2.metric("负面声量占比", f"{neg_percent}%", delta="重点关注" if neg_percent > warning_level else "正常")
+        c3.metric("口碑健康度", f"{100 - neg_percent}/100")
+        c4.metric("关键痛点捕获", f"{len(neg_df)} 条")
 
-        # 情报表
-        st.subheader("📋 用户真实吐槽/动态列表")
+        # 第二行：多平台直达链接（优化排版）
+        st.write("---")
+        l1, l2, l3, l4 = st.columns(4)
+        q_code = urllib.parse.quote(target_model)
+        l1.link_button("👁️ 微博实时搜索", f"https://s.weibo.com/weibo?q={q_code}")
+        l2.link_button("💬 贴吧深度反馈", f"https://tieba.baidu.com/f/search/res?qw={q_code}")
+        l3.link_button("📕 小红书参数吐槽", f"https://www.xiaohongshu.com/search_result?keyword={q_code}%20吐槽")
+        l4.link_button("🎞️ B站避雷评测", f"https://search.bilibili.com/all?keyword={q_code}%20避雷")
+
+        # 第三行：核心情报列表
+        st.subheader("📑 核心情报分析流")
         st.dataframe(
             df,
-            column_config={"链接": st.column_config.LinkColumn("直达原文", display_text="🔗")},
+            column_config={
+                "级别": st.column_config.TextColumn("状态", width="small"),
+                "情报标题": st.column_config.TextColumn("内容摘要", width="large"),
+                "痛点标签": st.column_config.TextColumn("捕获痛点", width="medium"),
+                "链接": st.column_config.LinkColumn("原文", display_text="🔗")
+            },
             hide_index=True, use_container_width=True
         )
 
-        # 词云可视化
+        # 第四行：可视化分析
         st.divider()
-        cw1, cw2 = st.columns(2)
+        v1, v2 = st.columns([1, 1])
         
-        with cw1:
-            st.subheader("🔵 核心议题（参数/配置）")
-            all_text = " ".join(df["用户发言摘要"].tolist())
-            if all_text:
-                wc1 = WordCloud(font_path='font.ttf', width=600, height=400, background_color="white", colormap='Blues').generate(all_text)
-                fig1, ax1 = plt.subplots(); ax1.imshow(wc1); ax1.axis("off"); st.pyplot(fig1)
+        with v1:
+            st.subheader("🔵 全网舆论热词")
+            all_text = " ".join(df["情报标题"].tolist())
+            wc1 = WordCloud(font_path='font.ttf', width=600, height=400, background_color="white", colormap='Blues').generate(all_text)
+            fig1, ax1 = plt.subplots(); ax1.imshow(wc1); ax1.axis("off"); st.pyplot(fig1)
 
-        with cw2:
-            st.subheader("🔴 负面预警词（用户最不满的点）")
+        with v2:
+            st.subheader("🔴 核心槽点提炼 (无需点开链接)")
             if not neg_df.empty:
-                neg_text = " ".join(neg_df["用户发言摘要"].tolist())
-                # 过滤冗余词，突出传感器等硬件名
-                for w in [final_keyword, 'vivo', 'ultra', 'x300', '小米', 'oppo']:
-                    neg_text = neg_text.lower().replace(w.lower(), "")
+                # 统计痛点标签的频率
+                pain_list = []
+                for row in neg_df["痛点标签"]:
+                    if row != "无": pain_list.extend(row.split(" / "))
                 
+                if pain_list:
+                    # 如果有具体标签，做个精美的条形图
+                    pain_counts = pd.Series(pain_list).value_counts()
+                    st.bar_chart(pain_counts, color="#FF4B4B")
+                
+                # 负面词云
+                neg_text = " ".join(neg_df["情报标题"].tolist())
+                for w in [target_model, 'vivo', 'x300', 'ultra', '小米', 'oppo']:
+                    neg_text = neg_text.lower().replace(w.lower(), "")
                 wc2 = WordCloud(font_path='font.ttf', width=600, height=400, background_color="white", colormap='Reds').generate(neg_text)
                 fig2, ax2 = plt.subplots(); ax2.imshow(wc2); ax2.axis("off"); st.pyplot(fig2)
             else:
-                st.write("目前尚未发现集中的参数吐槽。")
+                st.success("✨ 当前全网舆论平稳，暂无显著槽点。")
 
     else:
-        st.info("24小时内微博/贴吧暂无大规模吐槽，建议点击上方链接手动确认。")
+        st.error("无法调取实时数据，请确认网络连接或稍后再试。")
 
 except Exception as e:
-    st.error(f"连接异常: {e}")
-
-st.caption(f"数据更新时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    st.error(f"分析引擎故障: {e}")
