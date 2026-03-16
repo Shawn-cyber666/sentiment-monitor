@@ -5,6 +5,7 @@ from textblob import TextBlob
 from wordcloud import WordCloud
 import matplotlib.pyplot as plt
 from datetime import datetime
+import urllib.parse  # 新增：用于处理URL编码
 
 # 页面配置
 st.set_page_config(page_title="vivo X300u 实时舆论监控", layout="wide")
@@ -14,13 +15,18 @@ st.sidebar.info("数据来源：Google News RSS (实时更新)")
 
 # 1. 数据抓取函数
 def fetch_data(keyword):
-    # 构建RSS搜索链接 (针对 vivo X300u)
-    rss_url = f"https://news.google.com/rss/search?q={keyword}&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"
+    # 【核心修复】对关键词进行URL编码，将空格转为 %20
+    encoded_keyword = urllib.parse.quote(keyword)
+    rss_url = f"https://news.google.com/rss/search?q={encoded_keyword}&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"
+    
     feed = feedparser.parse(rss_url)
     
     data = []
-    for entry in feed.entries[:20]:  # 取最新的20条
-        # 简单情感分析 (0-1 之间)
+    if not feed.entries:
+        return pd.DataFrame()
+
+    for entry in feed.entries[:20]:
+        # 简单情感分析
         analysis = TextBlob(entry.title)
         sentiment = "正向" if analysis.sentiment.polarity >= 0 else "负向"
         
@@ -37,37 +43,40 @@ try:
     with st.spinner('正在同步全网舆论数据...'):
         df = fetch_data("vivo X300 Ultra")
 
-    # 3. 布局布局
-    col1, col2 = st.columns([2, 1])
+    if not df.empty:
+        # 3. 布局布局
+        col1, col2 = st.columns([2, 1])
 
-    with col1:
-        st.subheader("🔥 最新舆论动态")
-        st.dataframe(df, use_container_width=True)
+        with col1:
+            st.subheader("🔥 最新舆论动态")
+            st.dataframe(df, use_container_width=True)
 
-    with col2:
-        st.subheader("📊 情感分布")
-        sentiment_count = df["情感倾向"].value_counts()
-        st.bar_chart(sentiment_count)
+        with col2:
+            st.subheader("📊 情感分布")
+            sentiment_count = df["情感倾向"].value_counts()
+            st.bar_chart(sentiment_count)
 
-    # 4. 词云展示
-    st.divider()
-    st.subheader("☁️ 舆论关键词云")
-    all_titles = " ".join(df["标题"].tolist())
-    
-    # 针对中文环境的简单词云处理
-    wordcloud = WordCloud(
-        font_path=None, # 如果部署到Linux服务器需指定中文字体路径
-        width=800, 
-        height=400, 
-        background_color="white"
-    ).generate(all_titles)
+        # 4. 词云展示
+        st.divider()
+        st.subheader("☁️ 舆论关键词云")
+        all_titles = " ".join(df["标题"].tolist())
+        
+        # 注意：Streamlit Cloud 环境下可能缺中文字体，词云可能会显示方块
+        wordcloud = WordCloud(
+            width=800, 
+            height=400, 
+            background_color="white",
+            collocations=False # 避免词语重复
+        ).generate(all_titles)
 
-    fig, ax = plt.subplots()
-    ax.imshow(wordcloud, interpolation='bilinear')
-    ax.axis("off")
-    st.pyplot(fig)
+        fig, ax = plt.subplots()
+        ax.imshow(wordcloud, interpolation='bilinear')
+        ax.axis("off")
+        st.pyplot(fig)
+    else:
+        st.warning("未能抓取到相关数据，请尝试更换关键词或稍后再试。")
 
 except Exception as e:
-    st.error(f"暂时无法获取数据，请检查网络连接。错误: {e}")
+    st.error(f"发生错误: {e}")
 
 st.caption(f"最后更新时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
