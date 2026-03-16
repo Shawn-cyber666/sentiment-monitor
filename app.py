@@ -61,13 +61,27 @@ try:
         st.subheader("☁️ 舆论关键词云")
         all_titles = " ".join(df["标题"].tolist())
         
-        # 注意：Streamlit Cloud 环境下可能缺中文字体，词云可能会显示方块
-        wordcloud = WordCloud(
-            width=800, 
-            height=400, 
-            background_color="white",
-            collocations=False # 避免词语重复
-        ).generate(all_titles)
+        # 4. 词云展示
+        st.divider()
+        st.subheader("☁️ 舆论关键词云")
+        all_titles = " ".join(df["标题"].tolist())
+        
+        try:
+            # 尝试加载自定义字体
+            wordcloud = WordCloud(
+                font_path='font.ttf', 
+                width=800, 
+                height=400, 
+                background_color="white",
+                collocations=False 
+            ).generate(all_titles)
+
+            fig, ax = plt.subplots()
+            ax.imshow(wordcloud, interpolation='bilinear')
+            ax.axis("off")
+            st.pyplot(fig)
+        except Exception as font_error:
+            st.warning(f"词云字体加载失败，请确保仓库中有 font.ttf 文件。错误: {font_error}")
 
         fig, ax = plt.subplots()
         ax.imshow(wordcloud, interpolation='bilinear')
