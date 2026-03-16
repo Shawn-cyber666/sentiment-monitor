@@ -7,135 +7,117 @@ from datetime import datetime
 import urllib.parse
 
 # 1. 页面配置
-st.set_page_config(page_title="vivo 深度舆情监测系统", layout="wide")
+st.set_page_config(page_title="vivo 2026 旗舰舆情决策系统", layout="wide")
 
-# 2. 侧边栏配置
-st.sidebar.header("🎯 监控配置")
-search_keyword = st.sidebar.text_input("目标型号", "vivo X300 Ultra")
-warning_val = st.sidebar.slider("预警阈值 (%)", 0, 100, 25)
+# 2. 侧边栏：动态加载最新的竞品库
+st.sidebar.header("🚀 2026 旗舰实时监控")
 
-# 智能语义库
-NEG_WORDS = ['差', '烂', '断触', '发热', '烫', '卡顿', '死机', '黑屏', '后悔', '避雷', '吐槽', '不值', '智商税', '割韭菜', '翻车', '故障', '信号差']
-EXCLUDE_WORDS = ['差别', '差不多', '差旅', '出差', '价差', '偏差']
+try:
+    with open("keywords.txt", "r", encoding="utf-8") as f:
+        competitors = [line.strip() for line in f.readlines() if line.strip()]
+except:
+    competitors = ["小米 17 Ultra", "OPPO Find X8 Ultra", "荣耀 Magic 8"]
 
-# 3. 核心算法：语义识别与数据抓取
-def smart_analyze(text):
-    text = text.lower()
-    # 排除逻辑：包含排除词则不算负面
-    if any(ex in text for ex in EXCLUDE_WORDS):
-        return "正向"
-    # 命中逻辑
-    if any(neg in text for neg in NEG_WORDS):
-        return "负向"
-    return "正向"
+# 下拉菜单：默认包含 vivo 最新型号
+target_model = st.sidebar.selectbox("选择当前监控对象", ["vivo X300 Ultra", "vivo X400 Ultra"] + competitors)
+search_keyword = st.sidebar.text_input("或精准搜索特定硬件 (如: X300u 超广角)", "")
+final_keyword = search_keyword if search_keyword else target_model
 
-def fetch_data(keyword):
-    # 组合搜索：增加"缺点"等后缀来穿透公关稿
-    search_query = f"{keyword} (缺点 OR 吐槽 OR 真实评价 OR 测评)"
-    encoded_q = urllib.parse.quote(search_query)
+# 针对 2026 硬件槽点的专项词库
+NEG_WORDS = ['差', '烂', '断触', '发热', '烫', '卡顿', '死机', '黑屏', '后悔', '避雷', '吐槽', '不值', 
+             '智商税', '割韭菜', '翻车', '阉割', '没升级', '遗憾', '缺陷', '缩水', '配置低', '828', 'JN1', '偏色']
+EXCLUDE_WORDS = ['差别', '差不多', '出差', '价差']
+
+# 3. 实时数据引擎 (增加 when:1d 强制获取 24小时内数据)
+def fetch_realtime_data(keyword):
+    # 策略：型号 + 负面触发词 + 时间限制
+    # when:1d 代表过去24小时，when:7d 代表过去一周
+    encoded_q = urllib.parse.quote(f"{keyword} (遗憾 OR 缺点 OR 没升级 OR 吐槽) when:7d")
     rss_url = f"https://news.google.com/rss/search?q={encoded_q}&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"
     
     feed = feedparser.parse(rss_url)
     data = []
     
-    if not feed.entries:
-        return pd.DataFrame()
-
-    for entry in feed.entries[:50]:
-        full_title = entry.title
-        source = full_title.rsplit(" - ", 1)[1] if " - " in full_title else "媒体"
-        clean_title = full_title.rsplit(" - ", 1)[0] if " - " in full_title else full_title
+    for entry in feed.entries[:60]:
+        title = entry.title
+        source = title.rsplit(" - ", 1)[1] if " - " in title else "社交媒体"
+        clean_title = title.rsplit(" - ", 1)[0] if " - " in title else title
         
-        sentiment = smart_analyze(clean_title)
+        # 语义分析
+        sentiment = "正向"
+        if any(neg in clean_title.lower() for neg in NEG_WORDS):
+            if not any(ex in clean_title.lower() for ex in EXCLUDE_WORDS):
+                sentiment = "负向"
         
         data.append({
-            "级别": "🔴 预警" if sentiment == "负向" else "🟢 正常",
+            "状态": "🔴 预警" if sentiment == "负向" else "🟢 正常",
             "情报标题": clean_title,
             "媒体来源": source,
-            "发布时间": entry.published,
-            "原文链接": entry.link,
-            "倾向": sentiment
+            "倾向": sentiment,
+            "链接": entry.link,
+            "时间": entry.published
         })
     return pd.DataFrame(data)
 
-# 4. 主界面渲染
-st.title(f"📱 {search_keyword} 实时全网情报站")
+# 4. UI 布局
+st.title(f"🔍 {final_keyword} 24h 实时舆情看板")
 
-# 国内平台一键直达 (修正版链接)
-q_code = urllib.parse.quote(search_keyword)
+# 平台直达
+q_code = urllib.parse.quote(final_keyword)
 c1, c2, c3, c4 = st.columns(4)
-c1.markdown(f"[📱 酷安搜索](https://www.coolapk.com/search?q={q_code})")
-c2.markdown(f"[💬 贴吧讨论](https://tieba.baidu.com/f/search/res?qw={q_code})")
-c3.markdown(f"[📕 小红书槽点](https://www.xiaohongshu.com/search_result?keyword={q_code}%20缺点)")
-c4.markdown(f"[🎞️ B站避雷](https://search.bilibili.com/all?keyword={q_code}%20避雷)")
+c1.markdown(f"[📱 酷安最新动态](https://www.coolapk.com/search?q={q_code})")
+c2.markdown(f"[💬 贴吧用户反馈](https://tieba.baidu.com/f/search/res?qw={q_code})")
+c3.markdown(f"[📕 小红书真实评价](https://www.xiaohongshu.com/search_result?keyword={q_code})")
+c4.markdown(f"[🎞️ B站视频评测](https://search.bilibili.com/all?keyword={q_code})")
 
 try:
-    with st.spinner('正在同步国内各平台舆论...'):
-        df = fetch_data(search_keyword)
+    with st.spinner(f'正在穿透 2026 年 {final_keyword} 的底层舆论...'):
+        df = fetch_realtime_data(final_keyword)
 
     if not df.empty:
-        # 数据统计
         neg_df = df[df["倾向"] == "负向"]
-        neg_percent = int((len(neg_df) / len(df)) * 100)
-
-        # 预警条
-        if neg_percent >= warning_val:
-            st.error(f"🚨 预警：负面声量占比 ({neg_percent}%) 已超过设定阈值！")
-        else:
-            st.success(f"✅ 口碑状态：良好 (负面占比 {neg_percent}%)")
-
-        # 数据看板
+        
+        # 关键指标
         k1, k2, k3 = st.columns(3)
-        k1.metric("样本总数", f"{len(df)} 篇")
-        k2.metric("负面情报", f"{len(neg_df)} 篇")
-        k3.metric("实时口碑", f"{100 - neg_percent} 分")
+        k1.metric("活跃样本 (7日内)", f"{len(df)} 组")
+        k2.metric("负面声量", f"{len(neg_df)} 条", delta=f"{int(len(neg_df)/len(df)*100)}%", delta_color="inverse")
+        k3.metric("市场情绪指数", f"{100 - int(len(neg_df)/len(df)*100)}")
 
-        # 情报流表格 (找回跳转功能)
-        st.subheader("📋 实时情报流")
+        # 情报表
+        st.subheader("📋 实时情报流 (点击链接查看原文)")
         st.dataframe(
             df,
-            column_config={"原文链接": st.column_config.LinkColumn("直达", display_text="🔗")},
+            column_config={"链接": st.column_config.LinkColumn("直达", display_text="🔗")},
             hide_index=True, use_container_width=True
         )
 
-        # 词云可视化 (找回双词云)
+        # 词云可视化
         st.divider()
         cw1, cw2 = st.columns(2)
         
         with cw1:
-            st.subheader("🔵 全网讨论热词")
+            st.subheader("🔵 今日热议焦点")
             all_txt = " ".join(df["情报标题"].tolist())
             if all_txt:
-                try:
-                    wc1 = WordCloud(font_path='font.ttf', width=600, height=400, background_color="white", colormap='Blues').generate(all_txt)
-                    fig1, ax1 = plt.subplots()
-                    ax1.imshow(wc1)
-                    ax1.axis("off")
-                    st.pyplot(fig1)
-                except: st.warning("请确保 font.ttf 字体文件已上传")
+                wc1 = WordCloud(font_path='font.ttf', width=600, height=400, background_color="white", colormap='Blues').generate(all_txt)
+                fig1, ax1 = plt.subplots(); ax1.imshow(wc1); ax1.axis("off"); st.pyplot(fig1)
 
         with cw2:
-            st.subheader("🔴 核心痛点词云")
+            st.subheader("🔴 核心槽点/负面分布")
             if not neg_df.empty:
                 neg_txt = " ".join(neg_df["情报标题"].tolist())
-                # 过滤掉型号干扰词
-                for w in [search_keyword, 'vivo', 'x300', 'ultra']:
+                # 过滤冗余型号词
+                for w in [final_keyword, 'vivo', 'ultra', '小米', 'oppo', 'magic']:
                     neg_txt = neg_txt.lower().replace(w.lower(), "")
                 
-                try:
-                    wc2 = WordCloud(font_path='font.ttf', width=600, height=400, background_color="white", colormap='Reds').generate(neg_txt)
-                    fig2, ax2 = plt.subplots()
-                    ax2.imshow(wc2)
-                    ax2.axis("off")
-                    st.pyplot(fig2)
-                except: st.info("字体加载中...")
+                wc2 = WordCloud(font_path='font.ttf', width=600, height=400, background_color="white", colormap='Reds').generate(neg_txt)
+                fig2, ax2 = plt.subplots(); ax2.imshow(wc2); ax2.axis("off"); st.pyplot(fig2)
             else:
-                st.write("暂无明显负面关键词")
-
+                st.write("暂无明显负面槽点（或公关覆盖较好）。")
     else:
-        st.warning("暂未发现有效情报，请检查搜索词。")
+        st.warning("24小时内未发现有效负面情报，建议扩大搜索词或查看直达链接。")
 
 except Exception as e:
-    st.error(f"连接异常，请尝试刷新页面。错误详情: {e}")
+    st.error(f"数据获取异常: {e}")
 
-st.caption(f"最后同步时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+st.caption(f"当前时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | 数据源: 全网实时资讯及社区索引")
