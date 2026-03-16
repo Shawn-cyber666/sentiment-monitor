@@ -8,20 +8,20 @@ from datetime import datetime
 import urllib.parse
 
 # 1. 页面基本配置
-st.set_page_config(page_title="全网手机舆论监控预警站", layout="wide")
+st.set_page_config(page_title="全网手机舆论情报站", layout="wide")
 
 # 2. 侧边栏：搜索与配置
-st.sidebar.header("🔍 搜索配置")
+st.sidebar.header("🔍 监控配置")
 search_keyword = st.sidebar.text_input("输入监控型号", "vivo X300 Ultra")
-warning_threshold = st.sidebar.slider("预警阈值 (负面占比 %)", 0, 100, 30)
-st.sidebar.info(f"正在监控: {search_keyword}")
+warning_threshold = st.sidebar.slider("预警阈值 (负面占比 %)", 0, 100, 25)
 
-# 简单的中文负面词库（增强预警准确性）
-NEG_KEYWORDS = ['差', '烂', '贵', '断触', '发热', '卡顿', '失望', '缺陷', '退货', '避雷']
+# 增强型负面词库
+NEG_KEYWORDS = ['差', '烂', '贵', '断触', '发热', '卡顿', '失望', '缺陷', '退货', '避雷', '吐槽', '不值']
 
 # 3. 数据处理逻辑
 def fetch_data(keyword):
     encoded_keyword = urllib.parse.quote(keyword)
+    # 使用 Google News RSS (Streamlit海外服务器可顺畅访问)
     rss_url = f"https://news.google.com/rss/search?q={encoded_keyword}&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"
     feed = feedparser.parse(rss_url)
     
@@ -29,86 +29,91 @@ def fetch_data(keyword):
     if not feed.entries:
         return pd.DataFrame()
 
-    for entry in feed.entries[:30]: # 增加到30条数据
+    for entry in feed.entries[:40]:
         title = entry.title
-        # 情感判定逻辑：优先匹配负面词库，其次使用TextBlob
-        is_neg = any(word in title for word in NEG_KEYWORDS)
-        if is_neg:
-            sentiment = "负向"
-            score = -1
-        else:
-            # 兼容性处理
-            analysis = TextBlob(title)
-            sentiment = "正向" if analysis.sentiment.polarity >= 0 else "负向"
-            score = 1 if sentiment == "正向" else -1
+        # 来源解析：通常在标题末尾的 " - 来源"
+        source = "未知来源"
+        clean_title = title
+        if " - " in title:
+            clean_title = title.rsplit(" - ", 1)[0]
+            source = title.rsplit(" - ", 1)[1]
+
+        # 情感判定
+        is_neg = any(word in clean_title for word in NEG_KEYWORDS)
+        sentiment = "负向" if is_neg or TextBlob(clean_title).sentiment.polarity < 0 else "正向"
         
         data.append({
-            "标题": title,
+            "情报标题": clean_title,
+            "来源": source,
             "发布时间": entry.published,
-            "链接": entry.link,
-            "倾向": sentiment,
-            "得分": score
+            "访问原文": entry.link,
+            "倾向": sentiment
         })
     return pd.DataFrame(data)
 
 # 4. 主界面渲染
-st.title(f"📊 {search_keyword} 舆论实时情报站")
+st.title(f"📱 {search_keyword} 全网情报追踪")
+
+# --- 新增：国内平台快捷追踪 (解决小红书/微博实时访问) ---
+st.subheader("🚀 国内平台一键直达")
+encoded_q = urllib.parse.quote(search_keyword)
+col_link1, col_link2, col_link3, col_link4 = st.columns(4)
+with col_link1:
+    st.markdown(f"[📕 小红书最新评价](https://www.xiaohongshu.com/search_result?keyword={encoded_q})")
+with col_link2:
+    st.markdown(f"[👁️ 微博实时动态](https://s.weibo.com/weibo?q={encoded_q})")
+with col_link3:
+    st.markdown(f"[🔍 百度资讯搜索](https://www.baidu.com/s?tn=news&word={encoded_q})")
+with col_link4:
+    st.markdown(f"[📦 知乎深度评测](https://www.zhihu.com/search?type=content&q={encoded_q})")
 
 try:
-    with st.spinner('正在分析全网数据...'):
+    with st.spinner('正在调取全球情报源...'):
         df = fetch_data(search_keyword)
 
     if not df.empty:
-        # --- 实时预警功能 ---
-        neg_count = len(df[df["倾向"] == "负向"])
-        total_count = len(df)
-        neg_percent = int((neg_count / total_count) * 100)
-        
-        # 预警逻辑判断
+        # 预警逻辑
+        neg_percent = int((len(df[df["倾向"] == "负向"]) / len(df)) * 100)
         if neg_percent >= warning_threshold:
-            st.error(f"🚨 舆论预警：{search_keyword} 当前负面舆论占比高达 {neg_percent}%！(超过预警线 {warning_threshold}%)")
+            st.error(f"🚨 预警：当前负面声量占比 {neg_percent}%，建议立即查看详情。")
         else:
-            st.success(f"✅ 舆论平稳：{search_keyword} 当前负面占比为 {neg_percent}%，处于安全区间。")
+            st.success(f"✅ 状态：当前口碑稳定，负面占比仅为 {neg_percent}%。")
 
         # 数据看板
-        c1, c2, c3 = st.columns(3)
-        c1.metric("监测条目", f"{total_count} 条")
-        c2.metric("负面占比", f"{neg_percent}%")
-        c3.metric("健康度评分", f"{100 - neg_percent}/100")
+        st.subheader("📰 实时动态列表")
+        # 【关键更新】使用 LinkColumn 让原文链接可直接点击
+        st.dataframe(
+            df,
+            column_config={
+                "访问原文": st.column_config.LinkColumn("原文链接", display_text="点击跳转"),
+                "发布时间": st.column_config.DatetimeColumn("发布时间", format="D MMM YYYY, h:mm a"),
+            },
+            hide_index=True,
+            use_container_width=True
+        )
 
-        # 数据分布图表
-        col_left, col_right = st.columns([2, 1])
-        with col_left:
-            st.subheader("📝 最新情报列表")
-            st.dataframe(df[["标题", "发布时间", "倾向"]], use_container_width=True)
-        
-        with col_right:
-            st.subheader("📈 情感构成")
+        # 图表与词云
+        c1, c2 = st.columns([1, 1])
+        with c1:
+            st.subheader("📊 情感构成图")
             st.bar_chart(df["倾向"].value_counts())
-
-        # 词云展示
-        st.divider()
-        st.subheader("☁️ 实时舆论热词云")
-        all_titles = " ".join(df["标题"].tolist())
         
-        # 注意：请确保你已经按照之前的步骤上传了 font.ttf
-        try:
-            wordcloud = WordCloud(
-                font_path='font.ttf', 
-                width=1000, height=500, 
-                background_color="white"
-            ).generate(all_titles)
-            fig, ax = plt.subplots()
-            ax.imshow(wordcloud)
-            ax.axis("off")
-            st.pyplot(fig)
-        except:
-            st.warning("词云加载中...（请确保已上传 font.ttf 字体文件）")
+        with c2:
+            st.subheader("☁️ 舆论关键词云")
+            all_titles = " ".join(df["情报标题"].tolist())
+            try:
+                wordcloud = WordCloud(font_path='font.ttf', width=600, height=300, background_color="white").generate(all_titles)
+                fig, ax = plt.subplots()
+                ax.imshow(wordcloud)
+                ax.axis("off")
+                st.pyplot(fig)
+            except:
+                st.info("正在加载词云...")
 
     else:
-        st.warning("未找到相关数据，请尝试精简关键词（例如只搜索 'vivo X300'）。")
+        st.warning("暂无实时情报，请尝试缩短搜索词。")
 
 except Exception as e:
     st.error(f"系统运行异常: {e}")
 
-st.caption(f"数据实时同步时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+st.caption(f"数据更新于: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
